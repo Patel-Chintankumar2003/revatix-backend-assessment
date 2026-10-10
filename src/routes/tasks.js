@@ -5,6 +5,7 @@ const { auth, roles } = require("../middleware/auth");
 const { AppError, ok } = require("../utils/http");
 const { audit } = require("../services/audit");
 const { move } = require("../services/reorder");
+const { formatMySqlUtc } = require("../utils/datetime");
 const statuses = ["TODO", "IN_PROGRESS", "REVIEW", "DONE"],
   priorities = ["LOW", "MEDIUM", "HIGH", "URGENT"];
 const task = z.object({
@@ -32,7 +33,7 @@ router.post("/", roles("ADMIN", "MANAGER"), async (req, res, next) => {
         [
           b.title,
           b.description || null,
-          b.deadline,
+          formatMySqlUtc(b.deadline),
           b.priority,
           b.status,
           x.p,
@@ -111,7 +112,7 @@ router.patch("/:id", roles("ADMIN", "MANAGER"), async (req, res, next) => {
         req.params.id,
       ]);
       if (!r[0]) throw new AppError(404, "Task not found", "NOT_FOUND");
-      const n = { ...r[0], ...b };
+      const n = { ...r[0], ...b, deadline: formatMySqlUtc(b.deadline ?? r[0].deadline) };
       await c.execute(
         "UPDATE tasks SET title=?,description=?,deadline=?,priority=? WHERE id=?",
         [n.title, n.description, n.deadline, n.priority, req.params.id],

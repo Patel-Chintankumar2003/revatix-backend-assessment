@@ -4,6 +4,7 @@ const { pool, transaction } = require("../config/database");
 const { auth, roles } = require("../middleware/auth");
 const { AppError, ok } = require("../utils/http");
 const { audit } = require("../services/audit");
+const { formatMySqlUtc } = require("../utils/datetime");
 const b = z
   .object({
     employeeId: z.number().int().positive(),
@@ -15,6 +16,11 @@ const b = z
   });
 router.use(auth);
 async function save(c, data, actor, id) {
+  const mysqlData = {
+    ...data,
+    startTime: formatMySqlUtc(data.startTime),
+    endTime: formatMySqlUtc(data.endTime),
+  };
   let old;
   if (id) {
     const [r] = await c.execute("SELECT * FROM shifts WHERE id=? FOR UPDATE", [
@@ -24,7 +30,7 @@ async function save(c, data, actor, id) {
     old = r[0];
   }
   const ids = [
-    ...new Set([data.employeeId, ...(old ? [old.employee_id] : [])]),
+    ...new Set([mysqlData.employeeId, ...(old ? [old.employee_id] : [])]),
   ].sort((a, b) => a - b);
   for (const x of ids) {
     const [u] = await c.execute(
@@ -40,7 +46,7 @@ async function save(c, data, actor, id) {
   }
   const [conflict] = await c.execute(
     "SELECT id FROM shifts WHERE employee_id=? AND start_time < ? AND end_time > ? AND id != ? LIMIT 1",
-    [data.employeeId, data.endTime, data.startTime, id || 0],
+    [mysqlData.employeeId, mysqlData.endTime, mysqlData.startTime, id || 0],
   );
   if (conflict[0])
     throw new AppError(
@@ -51,14 +57,14 @@ async function save(c, data, actor, id) {
   if (id) {
     await c.execute(
       "UPDATE shifts SET employee_id=?,start_time=?,end_time=? WHERE id=?",
-      [data.employeeId, data.startTime, data.endTime, id],
+      [mysqlData.employeeId, mysqlData.startTime, mysqlData.endTime, id],
     );
     await audit(c, actor, "shift", id, "UPDATED", old, data);
     return { id: +id, ...data };
   }
   const [r] = await c.execute(
     "INSERT INTO shifts(employee_id,start_time,end_time,created_by) VALUES(?,?,?,?)",
-    [data.employeeId, data.startTime, data.endTime, actor],
+    [mysqlData.employeeId, mysqlData.startTime, mysqlData.endTime, actor],
   );
   await audit(c, actor, "shift", r.insertId, "CREATED", null, data);
   return { id: r.insertId, ...data };
